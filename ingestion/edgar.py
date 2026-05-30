@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
+from ingestion import _logging
+
 SOURCE = "sec_edgar"
 _TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
@@ -23,6 +25,8 @@ _ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{docu
 _DEFAULT_USER_AGENT = "findingstocks dor.shneider@gmail.com"
 
 GetJson = Callable[[str, str], Any]
+
+_logger = _logging.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -72,19 +76,32 @@ def fetch_filings(
     user_agent = user_agent or os.environ.get("SEC_EDGAR_USER_AGENT") or _DEFAULT_USER_AGENT
     get_json = get_json or _http_get_json
 
-    tickers_payload = get_json(_TICKERS_URL, user_agent)
-    cik = _resolve_cik(ticker, tickers_payload)
-    if cik is None:
-        raise ValueError(f"no CIK found for ticker {ticker!r} in SEC ticker map")
+    _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
 
-    raw = get_json(_SUBMISSIONS_URL.format(cik=cik), user_agent)
+    try:
+        tickers_payload = get_json(_TICKERS_URL, user_agent)
+        cik = _resolve_cik(ticker, tickers_payload)
+        if cik is None:
+            _logging.warning(_logger, "fetch.empty", source=SOURCE, ticker=ticker, reason="no_cik")
+            raise ValueError(f"no CIK found for ticker {ticker!r} in SEC ticker map")
+        raw = get_json(_SUBMISSIONS_URL.format(cik=cik), user_agent)
+    except ValueError:
+        raise
+    except Exception as exc:
+        _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
+        raise
     fetched_at = datetime.now(timezone.utc)
 
+    filings = _normalize(ticker, cik, raw, forms, limit)
+    if not filings:
+        _logging.warning(_logger, "fetch.empty", source=SOURCE, ticker=ticker, reason="no_filings")
+    else:
+        _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, rows=len(filings))
     return FilingsFetchResult(
         source=SOURCE,
         ticker=ticker,
         fetched_at=fetched_at,
-        normalized=_normalize(ticker, cik, raw, forms, limit),
+        normalized=filings,
         raw=raw,
     )
 

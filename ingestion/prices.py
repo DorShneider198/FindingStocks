@@ -14,8 +14,11 @@ from typing import Any
 
 import yfinance as yf
 
+from ingestion import _logging
+
 SOURCE = "yfinance"
 _DEFAULT_LOOKBACK_DAYS = 365
+_logger = _logging.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,18 +65,27 @@ def fetch_prices(
     if start is None:
         start = end - timedelta(days=_DEFAULT_LOOKBACK_DAYS)
 
+    _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
+
     # auto_adjust=False keeps both the raw Close and a separate Adj Close.
-    raw = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+    try:
+        raw = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+    except Exception as exc:
+        _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
+        raise
     fetched_at = datetime.now(timezone.utc)
 
     if raw is None or raw.empty:
+        _logging.warning(_logger, "fetch.empty", source=SOURCE, ticker=ticker)
         raise ValueError(f"no price data returned for ticker {ticker!r}")
 
+    bars = _normalize(ticker, raw)
+    _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, rows=len(bars))
     return PriceFetchResult(
         source=SOURCE,
         ticker=ticker,
         fetched_at=fetched_at,
-        normalized=_normalize(ticker, raw),
+        normalized=bars,
         raw=raw,
     )
 

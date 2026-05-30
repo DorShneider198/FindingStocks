@@ -20,8 +20,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ingestion import _logging
+
 SOURCE = "reddit"
 _DEFAULT_SUBREDDITS = ("wallstreetbets", "stocks", "investing")
+_logger = _logging.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,17 +74,28 @@ def fetch_reddit_mentions(
         raise ValueError("ticker must be a non-empty string")
 
     subreddits = subreddits or _DEFAULT_SUBREDDITS
-    reddit = reddit or _make_reddit()
 
-    multi = reddit.subreddit("+".join(subreddits))
-    submissions = multi.search(ticker, sort="new", time_filter=time_filter, limit=limit)
+    _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
 
-    fetched_at = datetime.now(timezone.utc)
-    normalized: list[RedditMention] = []
-    raw: list[dict] = []
-    for sub in submissions:
-        normalized.append(_normalize(ticker, sub))
-        raw.append(_raw_dict(sub))
+    try:
+        reddit = reddit or _make_reddit()
+        multi = reddit.subreddit("+".join(subreddits))
+        submissions = multi.search(ticker, sort="new", time_filter=time_filter, limit=limit)
+
+        fetched_at = datetime.now(timezone.utc)
+        normalized: list[RedditMention] = []
+        raw: list[dict] = []
+        for sub in submissions:
+            normalized.append(_normalize(ticker, sub))
+            raw.append(_raw_dict(sub))
+    except Exception as exc:
+        _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
+        raise
+
+    if not normalized:
+        _logging.warning(_logger, "fetch.empty", source=SOURCE, ticker=ticker)
+    else:
+        _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, rows=len(normalized))
 
     return RedditFetchResult(
         source=SOURCE,

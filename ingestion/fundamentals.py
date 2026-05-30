@@ -14,7 +14,10 @@ from typing import Any
 
 import yfinance as yf
 
+from ingestion import _logging
+
 SOURCE = "yfinance"
+_logger = _logging.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -58,12 +61,20 @@ def fetch_fundamentals(ticker: str) -> FundamentalsFetchResult:
     if not ticker:
         raise ValueError("ticker must be a non-empty string")
 
-    info = yf.Ticker(ticker).info
+    _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
+
+    try:
+        info = yf.Ticker(ticker).info
+    except Exception as exc:
+        _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
+        raise
     fetched_at = datetime.now(timezone.utc)
 
     if not info:
+        _logging.warning(_logger, "fetch.empty", source=SOURCE, ticker=ticker)
         raise ValueError(f"no fundamentals data returned for ticker {ticker!r}")
 
+    _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, fields=len(info))
     return FundamentalsFetchResult(
         source=SOURCE,
         ticker=ticker,
