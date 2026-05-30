@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ingestion.fundamentals import FundamentalsSnapshot
 from ingestion.prices import PriceBar
+from ingestion.reddit import RedditMention
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "findingstocks.db"
@@ -55,6 +56,21 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     dividend_yield REAL,
     profit_margin  REAL,
     PRIMARY KEY (ticker, as_of)
+);
+
+CREATE TABLE IF NOT EXISTS reddit_mentions (
+    ticker       TEXT    NOT NULL,
+    post_id      TEXT    NOT NULL,
+    subreddit    TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL,
+    title        TEXT    NOT NULL,
+    body         TEXT    NOT NULL,
+    score        INTEGER NOT NULL,
+    num_comments INTEGER NOT NULL,
+    author       TEXT,
+    url          TEXT    NOT NULL,
+    permalink    TEXT    NOT NULL,
+    PRIMARY KEY (ticker, post_id)
 );
 """
 
@@ -225,3 +241,86 @@ def load_fundamentals(
         dividend_yield=row["dividend_yield"],
         profit_margin=row["profit_margin"],
     )
+
+
+def save_reddit_mentions(conn: sqlite3.Connection, mentions: list[RedditMention]) -> int:
+    """Upsert Reddit mentions on ``(ticker, post_id)``; re-ingesting never duplicates.
+
+    Mutable fields (score, comments, title, body) are refreshed on conflict, so a
+    later fetch of the same post updates its running counts. Returns rows written.
+    """
+    rows = [
+        (
+            m.ticker,
+            m.post_id,
+            m.subreddit,
+            m.created_at.isoformat(),
+            m.title,
+            m.body,
+            m.score,
+            m.num_comments,
+            m.author,
+            m.url,
+            m.permalink,
+        )
+        for m in mentions
+    ]
+    conn.executemany(
+        """
+        INSERT INTO reddit_mentions (
+            ticker, post_id, subreddit, created_at, title, body,
+            score, num_comments, author, url, permalink
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, post_id) DO UPDATE SET
+            subreddit=excluded.subreddit, created_at=excluded.created_at,
+            title=excluded.title, body=excluded.body, score=excluded.score,
+            num_comments=excluded.num_comments, author=excluded.author,
+            url=excluded.url, permalink=excluded.permalink
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def load_reddit_mentions(
+    conn: sqlite3.Connection,
+    ticker: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[RedditMention]:
+    """Load Reddit mentions for ``ticker``, optionally bounded by ``created_at``.
+
+    Ordered oldest-first so callers can build a timeline directly.
+    """
+    query = (
+        "SELECT ticker, post_id, subreddit, created_at, title, body, "
+        "score, num_comments, author, url, permalink "
+        "FROM reddit_mentions WHERE ticker = ?"
+    )
+    params: list[object] = [ticker.strip().upper()]
+    if start is not None:
+        query += " AND created_at >= ?"
+        params.append(start.isoformat())
+    if end is not None:
+        query += " AND created_at <= ?"
+        params.append(end.isoformat())
+    query += " ORDER BY created_at"
+
+    return [
+        RedditMention(
+            ticker=row["ticker"],
+            post_id=row["post_id"],
+            subreddit=row["subreddit"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            title=row["title"],
+            body=row["body"],
+            score=row["score"],
+            num_comments=row["num_comments"],
+            author=row["author"],
+            url=row["url"],
+            permalink=row["permalink"],
+        )
+        for row in conn.execute(query, params)
+    ]

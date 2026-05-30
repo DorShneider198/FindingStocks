@@ -29,7 +29,8 @@ response separately**.
 - [x] SQLite schema (raw store + normalized `price_bars` table).  ← `storage/store.py`
 - [x] DB access layer (save/load price bars with upsert; save/load raw).  ← `storage/store.py` + `tests/test_store.py`
 - [x] `fundamentals` table + `save_fundamentals`/`load_fundamentals` (snapshot data).  ← `storage/store.py`
-- [ ] Tables for social/news sources' normalized data (added as those fetchers land).
+- [x] `reddit_mentions` table + `save_reddit_mentions`/`load_reddit_mentions` + `ingest_reddit` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
+- [ ] Tables for remaining sources' normalized data (news; added as those fetchers land).
 
 ## Stage 3 — `processing/`  ·  [ ] TODO
 - [ ] Sentiment scoring of social/news text.

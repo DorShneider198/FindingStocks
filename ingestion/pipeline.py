@@ -15,6 +15,7 @@ from datetime import date
 
 from ingestion.fundamentals import fetch_fundamentals
 from ingestion.prices import fetch_prices
+from ingestion.reddit import fetch_reddit_mentions
 from storage import store
 
 
@@ -58,6 +59,33 @@ def ingest_fundamentals(conn: sqlite3.Connection, ticker: str) -> IngestSummary:
     """
     result = fetch_fundamentals(ticker)
     rows_written = store.save_fundamentals(conn, result.normalized)
+    raw_id = store.save_raw(
+        conn,
+        source=result.source,
+        ticker=result.ticker,
+        fetched_at=result.fetched_at,
+        payload=json.dumps(result.raw, default=str),
+    )
+    return IngestSummary(ticker=result.ticker, rows_written=rows_written, raw_id=raw_id)
+
+
+def ingest_reddit(
+    conn: sqlite3.Connection,
+    ticker: str,
+    subreddits: tuple[str, ...] | None = None,
+    limit: int = 50,
+    time_filter: str = "month",
+    reddit=None,
+) -> IngestSummary:
+    """Fetch Reddit mentions for ``ticker`` and persist them + the raw post list.
+
+    ``reddit`` is an injectable PRAW client (for tests/offline). The raw list of
+    post dicts is JSON-serialized here so ``storage`` stays source-agnostic.
+    """
+    result = fetch_reddit_mentions(
+        ticker, subreddits=subreddits, limit=limit, time_filter=time_filter, reddit=reddit
+    )
+    rows_written = store.save_reddit_mentions(conn, result.normalized)
     raw_id = store.save_raw(
         conn,
         source=result.source,

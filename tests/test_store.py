@@ -6,6 +6,7 @@ Uses an in-memory SQLite DB, so it's deterministic and leaves nothing on disk.
 from datetime import date, datetime, timezone
 
 from ingestion.prices import PriceBar
+from ingestion.reddit import RedditMention
 from storage import store
 
 
@@ -43,3 +44,57 @@ def test_store_round_trips_bars_and_raw():
 
     # Missing id returns None.
     assert store.load_raw(conn, 9999) is None
+
+
+def _mentions():
+    return [
+        RedditMention(
+            ticker="AAPL",
+            post_id="abc123",
+            subreddit="wallstreetbets",
+            created_at=datetime(2024, 1, 2, 10, 0, tzinfo=timezone.utc),
+            title="AAPL to the moon",
+            body="loaded calls",
+            score=420,
+            num_comments=69,
+            author="ape_one",
+            url="https://reddit.com/r/wallstreetbets/abc123",
+            permalink="/r/wallstreetbets/comments/abc123/aapl/",
+        ),
+        RedditMention(
+            ticker="AAPL",
+            post_id="def456",
+            subreddit="stocks",
+            created_at=datetime(2024, 1, 5, 14, 0, tzinfo=timezone.utc),
+            title="Thoughts on AAPL earnings?",
+            body="",
+            score=12,
+            num_comments=4,
+            author=None,
+            url="https://reddit.com/r/stocks/def456",
+            permalink="/r/stocks/comments/def456/aapl_earnings/",
+        ),
+    ]
+
+
+def test_store_round_trips_reddit_mentions_with_upsert():
+    conn = store.get_connection(":memory:")
+    mentions = _mentions()
+
+    # Mentions round-trip exactly (incl. datetime + None author), oldest-first.
+    assert store.save_reddit_mentions(conn, mentions) == 2
+    assert store.load_reddit_mentions(conn, "AAPL") == mentions
+
+    # Upsert on (ticker, post_id): re-saving the same post refreshes its score,
+    # never duplicates.
+    bumped = mentions[0].__class__(**{**mentions[0].__dict__, "score": 999})
+    store.save_reddit_mentions(conn, [bumped])
+    loaded = store.load_reddit_mentions(conn, "AAPL")
+    assert len(loaded) == 2
+    assert loaded[0].score == 999
+
+    # created_at filtering works.
+    later = store.load_reddit_mentions(
+        conn, "AAPL", start=datetime(2024, 1, 4, tzinfo=timezone.utc)
+    )
+    assert len(later) == 1 and later[0].post_id == "def456"

@@ -12,6 +12,7 @@ import pandas as pd
 from ingestion import pipeline
 from ingestion.fundamentals import FundamentalsFetchResult, FundamentalsSnapshot
 from ingestion.prices import PriceBar, PriceFetchResult
+from ingestion.reddit import RedditFetchResult, RedditMention
 from storage import store
 
 
@@ -97,3 +98,54 @@ def test_ingest_fundamentals_persists(monkeypatch):
     rec = store.load_raw(conn, summary.raw_id)
     assert rec["source"] == "yfinance"
     assert json.loads(rec["payload"])["marketCap"] == 3_000_000_000_000
+
+
+def _canned_reddit():
+    mentions = [
+        RedditMention(
+            ticker="AAPL",
+            post_id="abc123",
+            subreddit="wallstreetbets",
+            created_at=datetime(2024, 1, 2, 10, 0, tzinfo=timezone.utc),
+            title="AAPL to the moon",
+            body="loaded calls",
+            score=420,
+            num_comments=69,
+            author="ape_one",
+            url="https://reddit.com/r/wallstreetbets/abc123",
+            permalink="/r/wallstreetbets/comments/abc123/aapl/",
+        ),
+    ]
+    raw = [{"id": "abc123", "score": 420}]
+    return RedditFetchResult(
+        source="reddit",
+        ticker="AAPL",
+        fetched_at=datetime(2024, 1, 3, 12, 0, tzinfo=timezone.utc),
+        normalized=mentions,
+        raw=raw,
+    )
+
+
+def test_ingest_reddit_persists(monkeypatch):
+    canned = _canned_reddit()
+    monkeypatch.setattr(
+        pipeline,
+        "fetch_reddit_mentions",
+        lambda ticker, subreddits, limit, time_filter, reddit: canned,
+    )
+
+    conn = store.get_connection(":memory:")
+    summary = pipeline.ingest_reddit(conn, "AAPL")
+
+    # Summary reflects what was persisted.
+    assert summary.ticker == "AAPL"
+    assert summary.rows_written == 1
+    assert summary.raw_id == 1
+
+    # Mentions are readable back exactly.
+    assert store.load_reddit_mentions(conn, "AAPL") == canned.normalized
+
+    # Raw post list is readable back as serialized JSON.
+    rec = store.load_raw(conn, summary.raw_id)
+    assert rec["source"] == "reddit"
+    assert json.loads(rec["payload"])[0]["id"] == "abc123"
