@@ -1,0 +1,5 @@
+# Project dependencies (unpinned for now; we can pin versions later if needed).
+yfinance
+pandas
+praw
+pytest
