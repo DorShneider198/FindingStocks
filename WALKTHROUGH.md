@@ -14,7 +14,7 @@ an API into the database.
 
 ## Status
 
-*Stages 1–2 built (ingestion + storage), minimal dashboard live. 16 tests passing.*
+*Stages 1–2 built (ingestion + storage), minimal dashboard live. 18 tests passing.*
 
 | Source | Fetch | Store | Notes |
 |---|:---:|:---:|---|
@@ -22,17 +22,14 @@ an API into the database.
 | Fundamentals (yfinance) | ✅ | ✅ | `fundamentals` table, full pipeline glue |
 | Reddit (PRAW) | ✅ | ✅ | `reddit_mentions` table, full pipeline glue |
 | News (Finnhub) | ✅ | ✅ | `news_articles` table, full pipeline glue (needs `FINNHUB_API_KEY` to fetch live) |
-| SEC filings (EDGAR) | ✅ | ✅ | `filings` table (metadata only — form, dates, URL) |
+| SEC filings (EDGAR) | ✅ | ✅ | `filings` (metadata) + `filing_sections` (extracted 10-K/10-Q text) |
 
-**The gap:** filing *documents* — the actual 10-K/10-Q text — aren't downloaded
-yet. We store where each filing lives, not what it says.
+**Ingestion is fully wired** — every source fetches *and* stores. Filing
+documents get carved into business / risk-factors / MD&A text with a
+per-section confidence flag; eyeball one with
+`.venv/bin/python scripts/dump_filing_section.py AAPL risk_factors`.
 
-**Next step (approved):** a filing-document fetcher that downloads the primary
-document and extracts business / risk factors / MD&A text into a
-`filing_sections` table, with per-section extraction metadata and a CLI dump
-for eyeballing the output.
-
-**After that:** `processing/` — sentiment scoring and per-day aggregation. That's
+**Next:** `processing/` — sentiment scoring and per-day aggregation. That's
 the first module that *thinks* about the data instead of just moving it.
 
 `dashboard/` now holds the minimal app (`app.py` UI + `views.py` data layer —
@@ -59,7 +56,7 @@ shows the stored raw data per ticker and can trigger fresh ingests.
 
 ```bash
 cd ~/FindingStocks
-.venv/bin/python -m pytest                    # 16 passed in a few seconds
+.venv/bin/python -m pytest                    # 18 passed in a few seconds
 .venv/bin/streamlit run dashboard/app.py      # the dashboard, on localhost:8501
 ```
 
@@ -185,10 +182,32 @@ Two details worth re-learning:
 
 ### `ingestion/pipeline.py` — fetch and save in one call
 
-Five functions today: `ingest_prices`, `ingest_fundamentals`, `ingest_reddit`,
-`ingest_news`, `ingest_filings`. Each does the same three steps — fetch, save
-the normalized rows, save the raw payload — and returns an
-`IngestSummary(ticker, rows_written, raw_id)`.
+Six functions today: `ingest_prices`, `ingest_fundamentals`, `ingest_reddit`,
+`ingest_news`, `ingest_filings`, `ingest_filing_sections`. Each does the same
+three steps — fetch, save the normalized rows, save the raw payload — and
+returns an `IngestSummary(ticker, rows_written, raw_id)`.
+`ingest_filing_sections` is the one that composes: it reads the `filings`
+table (so run `ingest_filings` first), downloads each document once, and
+skips accessions already extracted — EDGAR documents are immutable.
+
+### `ingestion/filing_docs.py` — 10-K/10-Q section extraction
+
+Downloads a filing's primary document and extracts **business / risk_factors /
+mdna** as plain text (10-Q maps MD&A to Part I Item 2; no business section).
+Extraction is heuristic — headings are matched at line starts so mid-sentence
+cross-references ("see Item 1A…") don't fool it, and the TOC loses to the real
+section by body length. Every section records **word_count, matched_heading,
+and a confidence flag** (`high`/`low`/`missing`) so a bad grab is visible in
+the DB, never silent. Raw HTML (5–30 MB per filing) is deliberately *not*
+stored — `raw_responses` gets a provenance record (URL, bytes, SHA-256)
+instead, since EDGAR documents are immutable and re-fetchable. Downloads are
+throttled to ≥0.5 s apart with a 10 s backoff on SEC's 403 rate-limit reply.
+
+Eyeball an extraction any time:
+
+```bash
+.venv/bin/python scripts/dump_filing_section.py AAPL risk_factors
+```
 
 ### `ingestion/_resilience.py` — retry + short-lived cache
 
@@ -229,7 +248,7 @@ Two files, split so the logic stays testable without streamlit:
 
 ### `tests/` — one test per module
 
-16 tests, all offline. Each proves its module normalizes correctly, preserves
+18 tests, all offline. Each proves its module normalizes correctly, preserves
 `raw`, and rejects an empty ticker. `tests/conftest.py` clears the yfinance
 caches around every test so nothing leaks between them.
 
@@ -249,6 +268,7 @@ tests use.
 | `reddit_mentions` | `(ticker, post_id)` | Reddit post |
 | `news_articles` | `(ticker, article_id)` | news article |
 | `filings` | `(ticker, accession_number)` | SEC filing (metadata) |
+| `filing_sections` | `(accession_number, section)` | extracted 10-K/10-Q section + confidence |
 | `raw_responses` | auto `id` | raw payload ever fetched |
 
 **Everything upserts.** Re-running an ingest never creates duplicates — it

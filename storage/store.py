@@ -16,6 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from ingestion.edgar import Filing
+from ingestion.filing_docs import FilingSection
 from ingestion.fundamentals import FundamentalsSnapshot
 from ingestion.news import NewsArticle
 from ingestion.prices import PriceBar
@@ -71,6 +72,19 @@ CREATE TABLE IF NOT EXISTS filings (
     report_date             TEXT,
     filing_url              TEXT    NOT NULL,
     PRIMARY KEY (ticker, accession_number)
+);
+
+CREATE TABLE IF NOT EXISTS filing_sections (
+    accession_number TEXT    NOT NULL,
+    section          TEXT    NOT NULL,
+    ticker           TEXT    NOT NULL,
+    form             TEXT    NOT NULL,
+    text             TEXT    NOT NULL,
+    word_count       INTEGER NOT NULL,
+    matched_heading  TEXT,
+    confidence       TEXT    NOT NULL,
+    extracted_at     TEXT    NOT NULL,
+    PRIMARY KEY (accession_number, section)
 );
 
 CREATE TABLE IF NOT EXISTS news_articles (
@@ -345,6 +359,85 @@ def load_filings(
             primary_doc_description=row["primary_doc_description"],
             report_date=date.fromisoformat(row["report_date"]) if row["report_date"] else None,
             filing_url=row["filing_url"],
+        )
+        for row in conn.execute(query, params)
+    ]
+
+
+def save_filing_sections(conn: sqlite3.Connection, sections: list[FilingSection]) -> int:
+    """Upsert extracted sections on ``(accession_number, section)``.
+
+    A re-extraction (e.g. after improving the heuristics) overwrites the old
+    text and metadata. Returns rows written.
+    """
+    rows = [
+        (
+            s.accession_number,
+            s.section,
+            s.ticker,
+            s.form,
+            s.text,
+            s.word_count,
+            s.matched_heading,
+            s.confidence,
+            s.extracted_at.isoformat(),
+        )
+        for s in sections
+    ]
+    conn.executemany(
+        """
+        INSERT INTO filing_sections (
+            accession_number, section, ticker, form, text,
+            word_count, matched_heading, confidence, extracted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(accession_number, section) DO UPDATE SET
+            ticker=excluded.ticker, form=excluded.form, text=excluded.text,
+            word_count=excluded.word_count, matched_heading=excluded.matched_heading,
+            confidence=excluded.confidence, extracted_at=excluded.extracted_at
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def load_filing_sections(
+    conn: sqlite3.Connection,
+    ticker: str,
+    section: str | None = None,
+    accession_number: str | None = None,
+) -> list[FilingSection]:
+    """Load extracted sections for ``ticker``, newest accession first.
+
+    ``section`` and/or ``accession_number`` narrow the result. Accession
+    numbers embed the filing year/sequence, so DESC ordering is newest-first.
+    """
+    query = (
+        "SELECT accession_number, section, ticker, form, text, "
+        "word_count, matched_heading, confidence, extracted_at "
+        "FROM filing_sections WHERE ticker = ?"
+    )
+    params: list[object] = [ticker.strip().upper()]
+    if section is not None:
+        query += " AND section = ?"
+        params.append(section)
+    if accession_number is not None:
+        query += " AND accession_number = ?"
+        params.append(accession_number)
+    query += " ORDER BY accession_number DESC, section"
+
+    return [
+        FilingSection(
+            accession_number=row["accession_number"],
+            ticker=row["ticker"],
+            form=row["form"],
+            section=row["section"],
+            text=row["text"],
+            word_count=row["word_count"],
+            matched_heading=row["matched_heading"],
+            confidence=row["confidence"],
+            extracted_at=datetime.fromisoformat(row["extracted_at"]),
         )
         for row in conn.execute(query, params)
     ]

@@ -34,7 +34,7 @@ response separately**.
 - [x] `reddit_mentions` table + `save_reddit_mentions`/`load_reddit_mentions` + `ingest_reddit` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
 - [x] `news_articles` table + `save_news_articles`/`load_news_articles` + `ingest_news` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
 - [x] `filings` table + `save_filings`/`load_filings` + `ingest_filings` (metadata).  ← `storage/store.py` + `ingestion/pipeline.py`
-- [ ] `filing_sections` table + document fetcher with section extraction (approved, after filings).
+- [x] `filing_sections` table + document fetcher with section extraction (business / risk factors / MD&A, extraction metadata + confidence flag, provenance instead of raw HTML, CLI dump script).  ← `ingestion/filing_docs.py` + `scripts/dump_filing_section.py` + `tests/test_filing_docs.py`
 
 ## Stage 3 — `processing/`  ·  [ ] TODO
 - [ ] Sentiment scoring of social/news text.

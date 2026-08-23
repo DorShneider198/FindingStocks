@@ -234,3 +234,39 @@ def test_ingest_filings_persists_with_upsert_and_filtered_load(monkeypatch):
     # Re-ingesting upserts: still two rows, no duplicates.
     pipeline.ingest_filings(conn, "AAPL", get_json=_fake_get_json)
     assert len(store.load_filings(conn, "AAPL")) == 2
+
+
+def test_ingest_filing_sections_extracts_skips_stored(monkeypatch):
+    from tests.test_edgar import _fake_get_json
+    from tests.test_filing_docs import _TEN_K_HTML
+
+    calls = []
+
+    def fake_get_text(url, user_agent):
+        calls.append(url)
+        return _TEN_K_HTML
+
+    conn = store.get_connection(":memory:")
+    pipeline.ingest_filings(conn, "AAPL", get_json=_fake_get_json)  # canned 10-K + 8-K
+
+    summary = pipeline.ingest_filing_sections(conn, "AAPL", forms=("10-K",), get_text=fake_get_text)
+    assert summary.rows_written == 3  # business + risk_factors + mdna
+    assert len(calls) == 1
+
+    # Sections are readable back with their metadata.
+    sections = store.load_filing_sections(conn, "AAPL")
+    assert {s.section for s in sections} == {"business", "risk_factors", "mdna"}
+    assert all(s.confidence == "high" for s in sections)
+    assert store.load_filing_sections(conn, "AAPL", section="mdna")[0].word_count >= 500
+
+    # Raw is the provenance record, not the HTML.
+    rec = store.load_raw(conn, summary.raw_id)
+    assert rec["source"] == "sec_edgar_doc"
+    payload = json.loads(rec["payload"])
+    assert set(payload) == {"filing_url", "bytes", "sha256"}
+    assert _TEN_K_HTML not in rec["payload"]
+
+    # Immutable documents: second run downloads nothing.
+    again = pipeline.ingest_filing_sections(conn, "AAPL", forms=("10-K",), get_text=fake_get_text)
+    assert again.rows_written == 0
+    assert len(calls) == 1
