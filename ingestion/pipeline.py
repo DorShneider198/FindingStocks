@@ -15,6 +15,7 @@ from datetime import date
 
 from ingestion import _logging
 from ingestion.fundamentals import fetch_fundamentals
+from ingestion.news import fetch_news
 from ingestion.prices import fetch_prices
 from ingestion.reddit import fetch_reddit_mentions
 from storage import store
@@ -112,6 +113,36 @@ def ingest_reddit(
         )
     except Exception as exc:
         _logging.error(_logger, "ingest.error", source="reddit", ticker=ticker.strip().upper(), error=type(exc).__name__)
+        raise
+    _logging.info(_logger, "ingest.ok", source=result.source, ticker=result.ticker, rows=rows_written, raw_id=raw_id)
+    return IngestSummary(ticker=result.ticker, rows_written=rows_written, raw_id=raw_id)
+
+
+def ingest_news(
+    conn: sqlite3.Connection,
+    ticker: str,
+    start: date | None = None,
+    end: date | None = None,
+    http_get=None,
+) -> IngestSummary:
+    """Fetch company news for ``ticker`` and persist articles + the raw JSON list.
+
+    ``http_get`` is an injectable transport (for tests/offline). The raw list is
+    JSON-serialized here so ``storage`` stays source-agnostic.
+    """
+    _logging.info(_logger, "ingest.start", source="finnhub", ticker=ticker.strip().upper())
+    try:
+        result = fetch_news(ticker, start=start, end=end, http_get=http_get)
+        rows_written = store.save_news_articles(conn, result.normalized)
+        raw_id = store.save_raw(
+            conn,
+            source=result.source,
+            ticker=result.ticker,
+            fetched_at=result.fetched_at,
+            payload=json.dumps(result.raw, default=str),
+        )
+    except Exception as exc:
+        _logging.error(_logger, "ingest.error", source="finnhub", ticker=ticker.strip().upper(), error=type(exc).__name__)
         raise
     _logging.info(_logger, "ingest.ok", source=result.source, ticker=result.ticker, rows=rows_written, raw_id=raw_id)
     return IngestSummary(ticker=result.ticker, rows_written=rows_written, raw_id=raw_id)

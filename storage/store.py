@@ -16,6 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from ingestion.fundamentals import FundamentalsSnapshot
+from ingestion.news import NewsArticle
 from ingestion.prices import PriceBar
 from ingestion.reddit import RedditMention
 
@@ -56,6 +57,17 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     dividend_yield REAL,
     profit_margin  REAL,
     PRIMARY KEY (ticker, as_of)
+);
+
+CREATE TABLE IF NOT EXISTS news_articles (
+    ticker       TEXT    NOT NULL,
+    article_id   INTEGER NOT NULL,
+    published_at TEXT    NOT NULL,
+    headline     TEXT    NOT NULL,
+    summary      TEXT    NOT NULL,
+    source_name  TEXT    NOT NULL,
+    url          TEXT    NOT NULL,
+    PRIMARY KEY (ticker, article_id)
 );
 
 CREATE TABLE IF NOT EXISTS reddit_mentions (
@@ -241,6 +253,78 @@ def load_fundamentals(
         dividend_yield=row["dividend_yield"],
         profit_margin=row["profit_margin"],
     )
+
+
+def save_news_articles(conn: sqlite3.Connection, articles: list[NewsArticle]) -> int:
+    """Upsert news articles on ``(ticker, article_id)``; re-ingesting never duplicates.
+
+    Mutable fields (headline, summary, url) are refreshed on conflict, since
+    publishers edit articles after the fact. Returns rows written.
+    """
+    rows = [
+        (
+            a.ticker,
+            a.article_id,
+            a.published_at.isoformat(),
+            a.headline,
+            a.summary,
+            a.source_name,
+            a.url,
+        )
+        for a in articles
+    ]
+    conn.executemany(
+        """
+        INSERT INTO news_articles (
+            ticker, article_id, published_at, headline, summary, source_name, url
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, article_id) DO UPDATE SET
+            published_at=excluded.published_at, headline=excluded.headline,
+            summary=excluded.summary, source_name=excluded.source_name,
+            url=excluded.url
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def load_news_articles(
+    conn: sqlite3.Connection,
+    ticker: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[NewsArticle]:
+    """Load news articles for ``ticker``, optionally bounded by ``published_at``.
+
+    Ordered oldest-first so callers can build a timeline directly.
+    """
+    query = (
+        "SELECT ticker, article_id, published_at, headline, summary, source_name, url "
+        "FROM news_articles WHERE ticker = ?"
+    )
+    params: list[object] = [ticker.strip().upper()]
+    if start is not None:
+        query += " AND published_at >= ?"
+        params.append(start.isoformat())
+    if end is not None:
+        query += " AND published_at <= ?"
+        params.append(end.isoformat())
+    query += " ORDER BY published_at"
+
+    return [
+        NewsArticle(
+            ticker=row["ticker"],
+            article_id=row["article_id"],
+            published_at=datetime.fromisoformat(row["published_at"]),
+            headline=row["headline"],
+            summary=row["summary"],
+            source_name=row["source_name"],
+            url=row["url"],
+        )
+        for row in conn.execute(query, params)
+    ]
 
 
 def save_reddit_mentions(conn: sqlite3.Connection, mentions: list[RedditMention]) -> int:

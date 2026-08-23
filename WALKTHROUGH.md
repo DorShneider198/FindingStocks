@@ -14,22 +14,23 @@ an API into the database.
 
 ## Status
 
-*Stages 1–2 built (ingestion + storage), minimal dashboard live. 14 tests passing.*
+*Stages 1–2 built (ingestion + storage), minimal dashboard live. 15 tests passing.*
 
 | Source | Fetch | Store | Notes |
 |---|:---:|:---:|---|
 | Prices (yfinance) | ✅ | ✅ | `price_bars` table, full pipeline glue |
 | Fundamentals (yfinance) | ✅ | ✅ | `fundamentals` table, full pipeline glue |
 | Reddit (PRAW) | ✅ | ✅ | `reddit_mentions` table, full pipeline glue |
-| News (Finnhub) | ✅ | ❌ | **no table, no `ingest_news`** — fetches but can't save |
+| News (Finnhub) | ✅ | ✅ | `news_articles` table, full pipeline glue (needs `FINNHUB_API_KEY` to fetch live) |
 | SEC filings (EDGAR) | ✅ | ❌ | **no table, no `ingest_filings`** — fetches but can't save |
 
-**The gap:** two of the five fetchers are only half-wired. They pull data fine,
-but there's nowhere to put it.
+**The gap:** SEC filings are still half-wired — metadata fetches fine but has
+nowhere to go, and the filing *documents* (the actual 10-K/10-Q text) aren't
+downloaded at all yet.
 
-**Next step:** the `news_articles` table + `save_news_articles` /
-`load_news_articles` in `storage/store.py`, plus `ingest_news` in `pipeline.py`.
-It mirrors the Reddit trio exactly.
+**Next step (approved):** the `filings` table + `save_filings`/`load_filings` +
+`ingest_filings` for the metadata; then a filing-document fetcher that extracts
+Item 1 / 1A / MD&A text into a `filing_sections` table.
 
 **After that:** `processing/` — sentiment scoring and per-day aggregation. That's
 the first module that *thinks* about the data instead of just moving it.
@@ -58,7 +59,7 @@ shows the stored raw data per ticker and can trigger fresh ingests.
 
 ```bash
 cd ~/FindingStocks
-.venv/bin/python -m pytest                    # 14 passed in a few seconds
+.venv/bin/python -m pytest                    # 15 passed in a few seconds
 .venv/bin/streamlit run dashboard/app.py      # the dashboard, on localhost:8501
 ```
 
@@ -184,11 +185,11 @@ Two details worth re-learning:
 
 ### `ingestion/pipeline.py` — fetch and save in one call
 
-Three functions today: `ingest_prices`, `ingest_fundamentals`, `ingest_reddit`.
-Each does the same three steps — fetch, save the normalized rows, save the raw
-payload — and returns an `IngestSummary(ticker, rows_written, raw_id)`.
-
-`ingest_news` and `ingest_filings` **don't exist yet.** That's the gap.
+Four functions today: `ingest_prices`, `ingest_fundamentals`, `ingest_reddit`,
+`ingest_news`. Each does the same three steps — fetch, save the normalized
+rows, save the raw payload — and returns an
+`IngestSummary(ticker, rows_written, raw_id)`. `ingest_filings` **doesn't
+exist yet** — that's the gap.
 
 ### `ingestion/_resilience.py` — retry + short-lived cache
 
@@ -229,7 +230,7 @@ Two files, split so the logic stays testable without streamlit:
 
 ### `tests/` — one test per module
 
-14 tests, all offline. Each proves its module normalizes correctly, preserves
+15 tests, all offline. Each proves its module normalizes correctly, preserves
 `raw`, and rejects an empty ticker. `tests/conftest.py` clears the yfinance
 caches around every test so nothing leaks between them.
 

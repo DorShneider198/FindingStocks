@@ -32,7 +32,9 @@ response separately**.
 - [x] DB access layer (save/load price bars with upsert; save/load raw).  ← `storage/store.py` + `tests/test_store.py`
 - [x] `fundamentals` table + `save_fundamentals`/`load_fundamentals` (snapshot data).  ← `storage/store.py`
 - [x] `reddit_mentions` table + `save_reddit_mentions`/`load_reddit_mentions` + `ingest_reddit` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
-- [ ] Tables for remaining sources' normalized data (news; added as those fetchers land).
+- [x] `news_articles` table + `save_news_articles`/`load_news_articles` + `ingest_news` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
+- [ ] `filings` table + `save_filings`/`load_filings` + `ingest_filings` (approved, next).
+- [ ] `filing_sections` table + document fetcher with section extraction (approved, after filings).
 
 ## Stage 3 — `processing/`  ·  [ ] TODO
 - [ ] Sentiment scoring of social/news text.

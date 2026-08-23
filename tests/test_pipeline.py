@@ -149,3 +149,59 @@ def test_ingest_reddit_persists(monkeypatch):
     rec = store.load_raw(conn, summary.raw_id)
     assert rec["source"] == "reddit"
     assert json.loads(rec["payload"])[0]["id"] == "abc123"
+
+
+def _canned_news():
+    from ingestion.news import NewsArticle, NewsFetchResult
+
+    articles = [
+        NewsArticle(
+            ticker="AAPL",
+            article_id=7891011,
+            published_at=datetime(2024, 1, 2, 9, 0, tzinfo=timezone.utc),
+            headline="Apple unveils new chip",
+            summary="Apple announced a new chip today.",
+            source_name="Reuters",
+            url="https://example.com/apple-chip",
+        ),
+    ]
+    raw = [{"id": 7891011, "headline": "Apple unveils new chip"}]
+    return NewsFetchResult(
+        source="finnhub",
+        ticker="AAPL",
+        fetched_at=datetime(2024, 1, 3, 12, 0, tzinfo=timezone.utc),
+        normalized=articles,
+        raw=raw,
+    )
+
+
+def test_ingest_news_persists_with_upsert(monkeypatch):
+    canned = _canned_news()
+    monkeypatch.setattr(
+        pipeline, "fetch_news", lambda ticker, start, end, http_get: canned
+    )
+
+    conn = store.get_connection(":memory:")
+    summary = pipeline.ingest_news(conn, "AAPL")
+
+    # Summary reflects what was persisted.
+    assert summary.ticker == "AAPL"
+    assert summary.rows_written == 1
+    assert summary.raw_id == 1
+
+    # Articles are readable back exactly.
+    assert store.load_news_articles(conn, "AAPL") == canned.normalized
+
+    # Raw article list is readable back as serialized JSON.
+    rec = store.load_raw(conn, summary.raw_id)
+    assert rec["source"] == "finnhub"
+    assert json.loads(rec["payload"])[0]["id"] == 7891011
+
+    # Re-ingesting upserts: still one row, refreshed headline wins.
+    from dataclasses import replace
+
+    canned.normalized[0] = replace(canned.normalized[0], headline="Apple unveils new chip (updated)")
+    pipeline.ingest_news(conn, "AAPL")
+    stored = store.load_news_articles(conn, "AAPL")
+    assert len(stored) == 1
+    assert stored[0].headline == "Apple unveils new chip (updated)"
