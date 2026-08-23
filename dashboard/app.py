@@ -11,8 +11,17 @@ All data access lives in ``dashboard/views.py`` (tested); this file is only UI.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
+
+# Streamlit puts this file's folder on sys.path, not the project root, so make
+# the project imports work no matter which directory the app is launched from.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from dashboard import views
 from storage import store
