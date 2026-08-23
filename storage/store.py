@@ -15,6 +15,7 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
+from ingestion.edgar import Filing
 from ingestion.fundamentals import FundamentalsSnapshot
 from ingestion.news import NewsArticle
 from ingestion.prices import PriceBar
@@ -57,6 +58,19 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     dividend_yield REAL,
     profit_margin  REAL,
     PRIMARY KEY (ticker, as_of)
+);
+
+CREATE TABLE IF NOT EXISTS filings (
+    ticker                  TEXT    NOT NULL,
+    accession_number        TEXT    NOT NULL,
+    cik                     INTEGER NOT NULL,
+    form                    TEXT    NOT NULL,
+    filing_date             TEXT    NOT NULL,
+    primary_document        TEXT    NOT NULL,
+    primary_doc_description TEXT,
+    report_date             TEXT,
+    filing_url              TEXT    NOT NULL,
+    PRIMARY KEY (ticker, accession_number)
 );
 
 CREATE TABLE IF NOT EXISTS news_articles (
@@ -253,6 +267,87 @@ def load_fundamentals(
         dividend_yield=row["dividend_yield"],
         profit_margin=row["profit_margin"],
     )
+
+
+def save_filings(conn: sqlite3.Connection, filings: list[Filing]) -> int:
+    """Upsert filings on ``(ticker, accession_number)``; re-ingesting never duplicates.
+
+    Filings are immutable at SEC, but the upsert keeps re-ingests harmless.
+    Returns rows written.
+    """
+    rows = [
+        (
+            f.ticker,
+            f.accession_number,
+            f.cik,
+            f.form,
+            f.filing_date.isoformat(),
+            f.primary_document,
+            f.primary_doc_description,
+            f.report_date.isoformat() if f.report_date else None,
+            f.filing_url,
+        )
+        for f in filings
+    ]
+    conn.executemany(
+        """
+        INSERT INTO filings (
+            ticker, accession_number, cik, form, filing_date,
+            primary_document, primary_doc_description, report_date, filing_url
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, accession_number) DO UPDATE SET
+            cik=excluded.cik, form=excluded.form, filing_date=excluded.filing_date,
+            primary_document=excluded.primary_document,
+            primary_doc_description=excluded.primary_doc_description,
+            report_date=excluded.report_date, filing_url=excluded.filing_url
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def load_filings(
+    conn: sqlite3.Connection,
+    ticker: str,
+    forms: tuple[str, ...] | None = None,
+    limit: int | None = None,
+) -> list[Filing]:
+    """Load filings for ``ticker``, newest first, optionally filtered by form.
+
+    Newest-first (unlike the timeline loaders) because filings are looked up as
+    "the latest 10-K", not plotted over time.
+    """
+    query = (
+        "SELECT ticker, accession_number, cik, form, filing_date, "
+        "primary_document, primary_doc_description, report_date, filing_url "
+        "FROM filings WHERE ticker = ?"
+    )
+    params: list[object] = [ticker.strip().upper()]
+    if forms:
+        placeholders = ", ".join("?" for _ in forms)
+        query += f" AND form IN ({placeholders})"
+        params.extend(forms)
+    query += " ORDER BY filing_date DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    return [
+        Filing(
+            ticker=row["ticker"],
+            cik=row["cik"],
+            form=row["form"],
+            filing_date=date.fromisoformat(row["filing_date"]),
+            accession_number=row["accession_number"],
+            primary_document=row["primary_document"],
+            primary_doc_description=row["primary_doc_description"],
+            report_date=date.fromisoformat(row["report_date"]) if row["report_date"] else None,
+            filing_url=row["filing_url"],
+        )
+        for row in conn.execute(query, params)
+    ]
 
 
 def save_news_articles(conn: sqlite3.Connection, articles: list[NewsArticle]) -> int:

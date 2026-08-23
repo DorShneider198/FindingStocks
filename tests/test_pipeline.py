@@ -205,3 +205,32 @@ def test_ingest_news_persists_with_upsert(monkeypatch):
     stored = store.load_news_articles(conn, "AAPL")
     assert len(stored) == 1
     assert stored[0].headline == "Apple unveils new chip (updated)"
+
+
+def test_ingest_filings_persists_with_upsert_and_filtered_load(monkeypatch):
+    from tests.test_edgar import _fake_get_json
+
+    conn = store.get_connection(":memory:")
+    summary = pipeline.ingest_filings(conn, "AAPL", get_json=_fake_get_json)
+
+    # Summary reflects what was persisted (canned data has a 10-K and an 8-K).
+    assert summary.ticker == "AAPL"
+    assert summary.rows_written == 2
+    assert summary.raw_id == 1
+
+    # Newest first, and the form filter narrows.
+    filings = store.load_filings(conn, "AAPL")
+    assert [f.form for f in filings] == ["10-K", "8-K"]
+    assert filings[0].filing_date == date(2024, 11, 1)
+    only_10k = store.load_filings(conn, "AAPL", forms=("10-K",))
+    assert [f.accession_number for f in only_10k] == ["0000320193-24-000123"]
+    assert store.load_filings(conn, "AAPL", limit=1)[0].form == "10-K"
+
+    # Raw submissions JSON is readable back.
+    rec = store.load_raw(conn, summary.raw_id)
+    assert rec["source"] == "sec_edgar"
+    assert json.loads(rec["payload"])["cik"] == "0000320193"
+
+    # Re-ingesting upserts: still two rows, no duplicates.
+    pipeline.ingest_filings(conn, "AAPL", get_json=_fake_get_json)
+    assert len(store.load_filings(conn, "AAPL")) == 2

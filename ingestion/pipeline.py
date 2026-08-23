@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from ingestion import _logging
+from ingestion.edgar import fetch_filings
 from ingestion.fundamentals import fetch_fundamentals
 from ingestion.news import fetch_news
 from ingestion.prices import fetch_prices
@@ -143,6 +144,37 @@ def ingest_news(
         )
     except Exception as exc:
         _logging.error(_logger, "ingest.error", source="finnhub", ticker=ticker.strip().upper(), error=type(exc).__name__)
+        raise
+    _logging.info(_logger, "ingest.ok", source=result.source, ticker=result.ticker, rows=rows_written, raw_id=raw_id)
+    return IngestSummary(ticker=result.ticker, rows_written=rows_written, raw_id=raw_id)
+
+
+def ingest_filings(
+    conn: sqlite3.Connection,
+    ticker: str,
+    forms: tuple[str, ...] | None = None,
+    limit: int = 20,
+    get_json=None,
+) -> IngestSummary:
+    """Fetch SEC filing metadata for ``ticker`` and persist it + the raw JSON.
+
+    ``get_json`` is an injectable transport (for tests/offline). The raw
+    submissions dict is JSON-serialized here so ``storage`` stays
+    source-agnostic.
+    """
+    _logging.info(_logger, "ingest.start", source="sec_edgar", ticker=ticker.strip().upper())
+    try:
+        result = fetch_filings(ticker, forms=forms, limit=limit, get_json=get_json)
+        rows_written = store.save_filings(conn, result.normalized)
+        raw_id = store.save_raw(
+            conn,
+            source=result.source,
+            ticker=result.ticker,
+            fetched_at=result.fetched_at,
+            payload=json.dumps(result.raw, default=str),
+        )
+    except Exception as exc:
+        _logging.error(_logger, "ingest.error", source="sec_edgar", ticker=ticker.strip().upper(), error=type(exc).__name__)
         raise
     _logging.info(_logger, "ingest.ok", source=result.source, ticker=result.ticker, rows=rows_written, raw_id=raw_id)
     return IngestSummary(ticker=result.ticker, rows_written=rows_written, raw_id=raw_id)
