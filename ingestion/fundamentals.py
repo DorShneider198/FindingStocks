@@ -15,9 +15,14 @@ from typing import Any
 import yfinance as yf
 
 from ingestion import _logging
+from ingestion._resilience import TTLCache, with_retry
 
 SOURCE = "yfinance"
 _logger = _logging.get_logger(__name__)
+
+# Successful fetches are cached for 15 minutes so repeated calls for the same
+# ticker (e.g. dashboard reruns) don't re-hit the API.
+_cache = TTLCache()
 
 
 @dataclass(frozen=True)
@@ -61,10 +66,16 @@ def fetch_fundamentals(ticker: str) -> FundamentalsFetchResult:
     if not ticker:
         raise ValueError("ticker must be a non-empty string")
 
+    cached = _cache.get(ticker)
+    if cached is not None:
+        # fetched_at stays the original fetch time — honest about data age.
+        _logging.info(_logger, "fetch.cache_hit", source=SOURCE, ticker=ticker)
+        return cached
+
     _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
 
     try:
-        info = yf.Ticker(ticker).info
+        info = with_retry(lambda: yf.Ticker(ticker).info)
     except Exception as exc:
         _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
         raise
@@ -75,13 +86,15 @@ def fetch_fundamentals(ticker: str) -> FundamentalsFetchResult:
         raise ValueError(f"no fundamentals data returned for ticker {ticker!r}")
 
     _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, fields=len(info))
-    return FundamentalsFetchResult(
+    result = FundamentalsFetchResult(
         source=SOURCE,
         ticker=ticker,
         fetched_at=fetched_at,
         normalized=_normalize(ticker, fetched_at.date(), info),
         raw=info,
     )
+    _cache.put(ticker, result)
+    return result
 
 
 def _normalize(ticker: str, as_of: date, info: dict) -> FundamentalsSnapshot:

@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     name           TEXT,
     sector         TEXT,
     industry       TEXT,
-    market_cap     INTEGER,
+    market_cap     REAL,
     trailing_pe    REAL,
     forward_pe     REAL,
     price_to_book  REAL,

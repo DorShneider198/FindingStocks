@@ -15,10 +15,15 @@ from typing import Any
 import yfinance as yf
 
 from ingestion import _logging
+from ingestion._resilience import TTLCache, with_retry
 
 SOURCE = "yfinance"
 _DEFAULT_LOOKBACK_DAYS = 365
 _logger = _logging.get_logger(__name__)
+
+# Successful fetches are cached for 15 minutes so repeated calls for the same
+# ticker/range (e.g. dashboard reruns) don't re-hit the API.
+_cache = TTLCache()
 
 
 @dataclass(frozen=True)
@@ -65,11 +70,20 @@ def fetch_prices(
     if start is None:
         start = end - timedelta(days=_DEFAULT_LOOKBACK_DAYS)
 
+    cache_key = (ticker, start.isoformat(), end.isoformat())
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        # fetched_at stays the original fetch time — honest about data age.
+        _logging.info(_logger, "fetch.cache_hit", source=SOURCE, ticker=ticker)
+        return cached
+
     _logging.info(_logger, "fetch.start", source=SOURCE, ticker=ticker)
 
     # auto_adjust=False keeps both the raw Close and a separate Adj Close.
     try:
-        raw = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+        raw = with_retry(
+            lambda: yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+        )
     except Exception as exc:
         _logging.error(_logger, "fetch.error", source=SOURCE, ticker=ticker, error=type(exc).__name__)
         raise
@@ -81,13 +95,15 @@ def fetch_prices(
 
     bars = _normalize(ticker, raw)
     _logging.info(_logger, "fetch.ok", source=SOURCE, ticker=ticker, rows=len(bars))
-    return PriceFetchResult(
+    result = PriceFetchResult(
         source=SOURCE,
         ticker=ticker,
         fetched_at=fetched_at,
         normalized=bars,
         raw=raw,
     )
+    _cache.put(cache_key, result)
+    return result
 
 
 def _normalize(ticker: str, frame: Any) -> list[PriceBar]:
