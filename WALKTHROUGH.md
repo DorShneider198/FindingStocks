@@ -14,7 +14,7 @@ an API into the database.
 
 ## Status
 
-*Stage 1–2 (ingestion + storage). 5 fetchers built. 12 tests passing.*
+*Stages 1–2 built (ingestion + storage), minimal dashboard live. 14 tests passing.*
 
 | Source | Fetch | Store | Notes |
 |---|:---:|:---:|---|
@@ -34,8 +34,10 @@ It mirrors the Reddit trio exactly.
 **After that:** `processing/` — sentiment scoring and per-day aggregation. That's
 the first module that *thinks* about the data instead of just moving it.
 
-Everything downstream — `processing/`, `features/`, `dashboard/`, `models/` — is
-still an empty `__init__.py`. `models/` stays **locked** until you say otherwise.
+`dashboard/` now holds the minimal app (`app.py` UI + `views.py` data layer —
+see [File by file](#file-by-file)). `processing/`, `features/`, and `models/`
+are still empty `__init__.py`s; `models/` stays **locked** until you say
+otherwise. Parked: Reddit match-confidence tiers (see `ROADMAP.md`).
 
 ---
 
@@ -46,9 +48,9 @@ sources — prices, fundamentals, SEC filings, Reddit, news — and stores it in
 local SQLite file. Later it will score sentiment, detect hype spikes, and show it
 all on a dashboard.
 
-Right now **only the collect-and-store half exists.** Nothing analyzes or
-displays anything yet. There is no app to launch, no CLI, no dashboard — the code
-is a library that tests and a REPL can call.
+Right now the **collect-and-store half plus a minimal dashboard** exist. Nothing
+analyzes anything yet — no sentiment, no hype detection — but the dashboard
+shows the stored raw data per ticker and can trigger fresh ingests.
 
 ---
 
@@ -56,10 +58,14 @@ is a library that tests and a REPL can call.
 
 ```bash
 cd ~/FindingStocks
-.venv/bin/python -m pytest          # 12 passed in ~1s
+.venv/bin/python -m pytest                    # 14 passed in a few seconds
+.venv/bin/streamlit run dashboard/app.py      # the dashboard, on localhost:8501
 ```
 
-To pull real data, open a REPL — the closest thing to "using" the tool today:
+The dashboard is the front door: enter a ticker, see what's stored, and hit
+"Fetch fresh data" to ingest. Prices and fundamentals work with no setup at
+all; the Reddit section shows "Reddit not configured" until you set the env
+vars below. You can also drive it from a REPL:
 
 ```python
 from storage import store
@@ -184,6 +190,15 @@ payload — and returns an `IngestSummary(ticker, rows_written, raw_id)`.
 
 `ingest_news` and `ingest_filings` **don't exist yet.** That's the gap.
 
+### `ingestion/_resilience.py` — retry + short-lived cache
+
+`with_retry(fn)` calls `fn` and, on failure, retries with exponential backoff
+plus jitter (1s, 2s, 4s… capped), logging each `retry.attempt`. `TTLCache`
+holds successful results for 15 minutes. Both yfinance fetchers use them: a
+repeat call for the same ticker within the window logs `fetch.cache_hit` and
+returns the cached result — with its **original** `fetched_at`, so the
+timestamp is honest about data age. Reddit/Finnhub/EDGAR don't use it yet.
+
 ### `ingestion/_logging.py` — structured logging
 
 A thin wrapper over stdlib `logging` that emits lines like
@@ -197,10 +212,26 @@ It deliberately does *not* configure output — that's an application's job, and
 there's no application yet. Call `configure_logging()` in a REPL when you want to
 watch it work.
 
+### `dashboard/` — the minimal app
+
+Two files, split so the logic stays testable without streamlit:
+
+- **`views.py`** — the data layer. `load_ticker_view(conn, ticker)` reads what's
+  stored (fundamentals, a year of price bars, up to 50 newest mentions) and
+  never fetches. `ingest_ticker(conn, ticker)` runs the wired ingests with
+  per-source isolation: each source reports `ok: N rows` or `error: <type>`,
+  and Reddit reports a plain "not configured" message when the env vars are
+  unset — one broken source never blocks the others.
+- **`app.py`** — thin Streamlit UI over `views.py`: ticker input, fundamentals
+  table, close-price line chart, mentions table with links, and a single
+  "Fetch fresh data" button. Run it with
+  `.venv/bin/streamlit run dashboard/app.py`.
+
 ### `tests/` — one test per module
 
-12 tests, all offline. Each proves its module normalizes correctly, preserves
-`raw`, and rejects an empty ticker. They run in about a second.
+14 tests, all offline. Each proves its module normalizes correctly, preserves
+`raw`, and rejects an empty ticker. `tests/conftest.py` clears the yfinance
+caches around every test so nothing leaks between them.
 
 ---
 

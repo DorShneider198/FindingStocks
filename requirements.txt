@@ -3,3 +3,4 @@ yfinance
 pandas
 praw
 pytest
+streamlit

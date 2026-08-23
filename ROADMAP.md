@@ -23,6 +23,8 @@ response separately**.
 - [x] SEC EDGAR filings fetcher (free, no key — stdlib `urllib`).  ← `ingestion/edgar.py` + `tests/test_edgar.py`
 - [x] Reddit fetcher (PRAW — wallstreetbets, stocks, investing).  ← `ingestion/reddit.py` + `tests/test_reddit.py`
 - [x] News fetcher (Finnhub company-news, key via `FINNHUB_API_KEY`).  ← `ingestion/news.py` + `tests/test_news.py`
+- [x] Retry (exponential backoff) + 15-min TTL cache for the yfinance fetchers.  ← `ingestion/_resilience.py` + `tests/test_resilience.py`
+- [ ] **PARKED** — Reddit match confidence (cashtag/exact/loose tiers + `match` field on `RedditMention`; drop non-matches). Contract was approved in principle; revisit when Reddit credentials are available.
 - [ ] (Skipped for now: Twitter/X — paid; StockTwits — registration paused.)
 
 ## Stage 2 — `storage/`  ·  [ ] IN PROGRESS
@@ -41,7 +43,10 @@ response separately**.
 ## Stage 4 — `features/`  ·  [ ] TODO
 - [ ] Assemble a feature vector per ticker per day (processing outputs + fundamentals).
 
-## Stage 5 — `dashboard/`  ·  [ ] TODO  ← the MVP, first useful deliverable
+## Stage 5 — `dashboard/`  ·  [ ] IN PROGRESS  ← the MVP, first useful deliverable
+- [x] Minimal raw-data dashboard: ticker → fundamentals table, price chart, Reddit
+      mentions, with a per-source "Fetch fresh data" button and clean degradation
+      when Reddit creds are unset.  ← `dashboard/app.py` + `dashboard/views.py` + `tests/test_dashboard_views.py`
 - [ ] Ticker in → fundamentals view.
 - [ ] Sentiment timeline.
 - [ ] Hype detection display.
