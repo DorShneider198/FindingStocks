@@ -56,9 +56,10 @@ sources — prices, fundamentals, SEC filings, Reddit, news — and stores it in
 local SQLite file. Later it will score sentiment, detect hype spikes, and show it
 all on a dashboard.
 
-Right now the **collect-and-store half plus a minimal dashboard** exist. Nothing
-analyzes anything yet — no sentiment, no hype detection — but the dashboard
-shows the stored raw data per ticker and can trigger fresh ingests.
+Built so far: the **collect-and-store layer**, a **minimal dashboard**, and the
+first analysis piece — **grounded LLM research briefs** (`processing/explain.py`).
+No sentiment scoring or hype detection yet. The dashboard shows stored raw data
+per ticker and can trigger fresh ingests; briefs don't render there yet.
 
 ---
 
