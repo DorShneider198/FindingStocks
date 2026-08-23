@@ -4,3 +4,4 @@ pandas
 praw
 pytest
 streamlit
+anthropic

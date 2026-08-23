@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS price_bars (
     PRIMARY KEY (ticker, date)
 );
 
+CREATE TABLE IF NOT EXISTS briefs (
+    ticker       TEXT NOT NULL,
+    source_hash  TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    what_it_does TEXT NOT NULL,
+    bull_case    TEXT NOT NULL,
+    bear_case    TEXT NOT NULL,
+    sources_json TEXT NOT NULL,
+    PRIMARY KEY (ticker, source_hash)
+);
+
 CREATE TABLE IF NOT EXISTS raw_responses (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     source     TEXT NOT NULL,
@@ -184,6 +196,68 @@ def load_price_bars(
         )
         for row in conn.execute(query, params)
     ]
+
+
+def save_brief(
+    conn: sqlite3.Connection,
+    ticker: str,
+    source_hash: str,
+    generated_at: datetime,
+    model: str,
+    what_it_does: str,
+    bull_case: str,
+    bear_case: str,
+    sources_json: str,
+) -> int:
+    """Upsert one generated research brief, keyed by ``(ticker, source_hash)``.
+
+    Plain fields rather than a dataclass so ``storage`` never imports from
+    ``processing`` (which imports storage — a dataclass here would be a cycle).
+    """
+    conn.execute(
+        """
+        INSERT INTO briefs (
+            ticker, source_hash, generated_at, model,
+            what_it_does, bull_case, bear_case, sources_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, source_hash) DO UPDATE SET
+            generated_at=excluded.generated_at, model=excluded.model,
+            what_it_does=excluded.what_it_does, bull_case=excluded.bull_case,
+            bear_case=excluded.bear_case, sources_json=excluded.sources_json
+        """,
+        (ticker, source_hash, generated_at.isoformat(), model,
+         what_it_does, bull_case, bear_case, sources_json),
+    )
+    conn.commit()
+    return 1
+
+
+def load_brief(conn: sqlite3.Connection, ticker: str, source_hash: str) -> dict | None:
+    """Load a cached brief for ``(ticker, source_hash)``, or ``None``."""
+    row = conn.execute(
+        "SELECT * FROM briefs WHERE ticker = ? AND source_hash = ?",
+        (ticker.strip().upper(), source_hash),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def load_raw_payloads(
+    conn: sqlite3.Connection, source: str, ticker: str, limit: int = 5
+) -> list[str]:
+    """Load the newest raw payloads for ``(source, ticker)``, newest first.
+
+    Lets callers mine fields we never normalized (e.g. yfinance's
+    ``longBusinessSummary``) out of the raw archive. Returns up to ``limit``
+    payloads because one source tag can carry several shapes (yfinance stores
+    both price frames and ``.info`` dicts under the same tag).
+    """
+    rows = conn.execute(
+        "SELECT payload FROM raw_responses WHERE source = ? AND ticker = ? "
+        "ORDER BY id DESC LIMIT ?",
+        (source, ticker.strip().upper(), limit),
+    ).fetchall()
+    return [row["payload"] for row in rows]
 
 
 def save_raw(

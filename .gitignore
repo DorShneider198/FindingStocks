@@ -15,3 +15,6 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# Secrets (API keys) — never commit
+.env

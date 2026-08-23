@@ -38,8 +38,9 @@ response separately**.
 - [x] Foreign-issuer support: 20-F section map (Items 3/4/5) + widened default forms incl. amendments; section loads ordered by true filing date.  ← `ingestion/filing_docs.py` + `ingestion/pipeline.py`
 - [ ] 40-F section extraction (wrapper form — content lives in exhibits: AIF + MD&A docs via the accession's index.json). Separate step; until then 40-F skips with a logged `no_section_map`.
 
-## Stage 3 — `processing/`  ·  [ ] TODO
-- [ ] Sentiment scoring of social/news text.
+## Stage 3 — `processing/`  ·  [ ] IN PROGRESS
+- [x] LLM research briefs (`generate_brief`): what-it-does / bull / bear, grounded strictly in stored docs with per-claim `[S#]` citations, validated in code, cached in `briefs` by `(ticker, source_hash)`. Anthropic API, key via `ANTHROPIC_API_KEY` (.env supported, gitignored).  ← `processing/explain.py` + `tests/test_explain.py`
+- [ ] Sentiment scoring of social/news text.  (deliberately skipped for now — the brief layer above is the product; revisit later)
 - [ ] Aggregation per ticker per day: sentiment score, mention volume, change in
       mention volume.
 - [ ] Hype / spike detection on mention volume.

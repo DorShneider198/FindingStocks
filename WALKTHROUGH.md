@@ -14,7 +14,7 @@ an API into the database.
 
 ## Status
 
-*Stages 1–2 built (ingestion + storage), minimal dashboard live. 18 tests passing.*
+*Stages 1–2 built (ingestion + storage), minimal dashboard live. 19 tests passing.*
 
 | Source | Fetch | Store | Notes |
 |---|:---:|:---:|---|
@@ -29,8 +29,18 @@ documents get carved into business / risk-factors / MD&A text with a
 per-section confidence flag; eyeball one with
 `.venv/bin/python scripts/dump_filing_section.py AAPL risk_factors`.
 
-**Next:** `processing/` — sentiment scoring and per-day aggregation. That's
-the first module that *thinks* about the data instead of just moving it.
+**New — the explanation layer** (`processing/explain.py`): `generate_brief`
+turns stored documents into three plain-English briefs — what the company
+does, the bull case, the bear case — via the Anthropic API, strictly grounded:
+every claim cites a stored source (`[S#]`), hallucinated citations are
+rejected in code, thin sources produce an honest "sources don't support this"
+instead of an invented thesis. Cached in the `briefs` table by
+`(ticker, source_hash)` so identical stored data never re-bills. Needs
+`ANTHROPIC_API_KEY` (env or gitignored `.env` at the repo root).
+
+**Next in `processing/`:** sentiment scoring + per-day aggregation
+(deliberately parked — the brief layer is the product). Also pending: the
+dashboard tab that renders briefs with citation links.
 
 `dashboard/` now holds the minimal app (`app.py` UI + `views.py` data layer —
 see [File by file](#file-by-file)). `processing/`, `features/`, and `models/`
@@ -56,7 +66,7 @@ shows the stored raw data per ticker and can trigger fresh ingests.
 
 ```bash
 cd ~/FindingStocks
-.venv/bin/python -m pytest                    # 18 passed in a few seconds
+.venv/bin/python -m pytest                    # 19 passed in a few seconds
 .venv/bin/streamlit run dashboard/app.py      # the dashboard, on localhost:8501
 ```
 
@@ -83,6 +93,7 @@ store.load_price_bars(conn, "AAPL")  # read it back
 | `REDDIT_CLIENT_SECRET` | Reddit | same page |
 | `REDDIT_USER_AGENT` | Reddit | optional; defaults to a sensible string |
 | `SEC_EDGAR_USER_AGENT` | SEC filings | optional; SEC just wants a contact email |
+| `ANTHROPIC_API_KEY` | research briefs | console.anthropic.com — env or `.env` file (gitignored) |
 
 Prices and fundamentals need **no key at all** — yfinance is free and
 unauthenticated. And no key is needed to run the tests: every test injects a fake
@@ -252,7 +263,7 @@ Two files, split so the logic stays testable without streamlit:
 
 ### `tests/` — one test per module
 
-18 tests, all offline. Each proves its module normalizes correctly, preserves
+19 tests, all offline. Each proves its module normalizes correctly, preserves
 `raw`, and rejects an empty ticker. `tests/conftest.py` clears the yfinance
 caches around every test so nothing leaks between them.
 
@@ -273,6 +284,7 @@ tests use.
 | `news_articles` | `(ticker, article_id)` | news article |
 | `filings` | `(ticker, accession_number)` | SEC filing (metadata) |
 | `filing_sections` | `(accession_number, section)` | extracted 10-K/10-Q section + confidence |
+| `briefs` | `(ticker, source_hash)` | generated research brief |
 | `raw_responses` | auto `id` | raw payload ever fetched |
 
 **Everything upserts.** Re-running an ingest never creates duplicates — it
