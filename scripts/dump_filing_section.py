@@ -21,33 +21,41 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ingestion.pipeline import ingest_filing_sections, ingest_filings  # noqa: E402
+from ingestion.pipeline import DEFAULT_DOC_FORMS, ingest_filing_sections, ingest_filings  # noqa: E402
 from storage import store  # noqa: E402
+
+
+def _matching(conn, ticker: str, section: str, form: str | None):
+    """Stored sections for the ticker, optionally narrowed to one base form."""
+    return [
+        s for s in store.load_filing_sections(conn, ticker, section=section)
+        if form is None or s.form.upper().removesuffix("/A") == form
+    ]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("ticker")
     parser.add_argument("section", choices=("business", "risk_factors", "mdna"))
-    parser.add_argument("--form", default="10-K", choices=("10-K", "10-Q"))
+    parser.add_argument(
+        "--form", default=None, choices=("10-K", "10-Q", "20-F"),
+        help="restrict to one form type; default: newest of any supported form "
+             "(so foreign issuers filing 20-F work without knowing the form)",
+    )
     args = parser.parse_args()
     ticker = args.ticker.strip().upper()
 
     conn = store.get_connection()
-    sections = [
-        s for s in store.load_filing_sections(conn, ticker, section=args.section)
-        if s.form == args.form
-    ]
+    sections = _matching(conn, ticker, args.section, args.form)
     if not sections:
         print(f"nothing stored for {ticker} {args.section} — ingesting...", file=sys.stderr)
-        ingest_filings(conn, ticker, forms=(args.form,), limit=1)
-        ingest_filing_sections(conn, ticker, forms=(args.form,), limit=1)
-        sections = [
-            s for s in store.load_filing_sections(conn, ticker, section=args.section)
-            if s.form == args.form
-        ]
+        forms = (args.form, f"{args.form}/A") if args.form else DEFAULT_DOC_FORMS
+        ingest_filings(conn, ticker, forms=forms, limit=3)
+        ingest_filing_sections(conn, ticker, forms=forms, limit=3)
+        sections = _matching(conn, ticker, args.section, args.form)
     if not sections:
-        print(f"no {args.section} found for {ticker} ({args.form})", file=sys.stderr)
+        wanted = args.form or "any supported form"
+        print(f"no {args.section} found for {ticker} ({wanted})", file=sys.stderr)
         return 1
 
     s = sections[0]  # newest accession

@@ -51,11 +51,28 @@ _MIN_INTERVAL_SECONDS = 0.5
 _RATE_LIMIT_BACKOFF_SECONDS = 10.0
 _MIN_WORDS_HIGH_CONFIDENCE = 500
 
-# Which items make up each canonical section, per form type.
+# Which items make up each canonical section, per (amendment-normalized) form.
+# 20-F (foreign private issuers) is item-structured like a 10-K, numbered
+# differently: Item 3 "Key Information" holds risk factors (section D), Item 4
+# is the business, Item 5 "Operating and Financial Review" is the MD&A
+# equivalent. 40-F is NOT here on purpose: it's a wrapper whose content lives
+# in exhibits (AIF, MD&A) — support is a separate step; until then it skips
+# with a visible log rather than a wrong extraction.
 _SECTION_ITEMS = {
     "10-K": {"business": "1", "risk_factors": "1A", "mdna": "7"},
     "10-Q": {"risk_factors": "1A", "mdna": "2"},
+    "20-F": {"risk_factors": "3", "business": "4", "mdna": "5"},
 }
+
+
+def _base_form(form: str) -> str:
+    """Normalize a form name for section-map lookup: 10-K/A -> 10-K."""
+    return form.upper().removesuffix("/A")
+
+
+def has_section_map(form: str) -> bool:
+    """True when we know how to extract sections from this form type."""
+    return _base_form(form) in _SECTION_ITEMS
 
 GetText = Callable[[str, str], str]
 
@@ -98,10 +115,12 @@ def fetch_filing_sections(
     Raises ``ValueError`` for form types we don't know how to section
     (only 10-K and 10-Q are supported). ``get_text`` is injectable for tests.
     """
-    form = filing.form.upper()
-    items = _SECTION_ITEMS.get(form)
+    items = _SECTION_ITEMS.get(_base_form(filing.form))
     if items is None:
-        raise ValueError(f"no section map for form {filing.form!r} (10-K and 10-Q only)")
+        raise ValueError(
+            f"no section map for form {filing.form!r} "
+            f"(supported: {', '.join(sorted(_SECTION_ITEMS))} and their /A amendments)"
+        )
 
     user_agent = user_agent or os.environ.get("SEC_EDGAR_USER_AGENT") or _DEFAULT_USER_AGENT
 
@@ -229,7 +248,8 @@ def _extract_section(
         body = text[match.end(): nxt.start() if nxt else len(text)].strip()
         if len(body) > len(best_body):
             best_body = body
-            best_heading = text[match.start(): match.end() + 40].split("\n")[0].strip()
+            # Collapse whitespace: headings can wrap mid-phrase ("Item\n3.").
+            best_heading = " ".join(text[match.start(): match.end() + 40].split())[:60]
 
     words = len(best_body.split()) if best_body else 0
     if not best_body:

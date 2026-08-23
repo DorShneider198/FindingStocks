@@ -408,24 +408,28 @@ def load_filing_sections(
     section: str | None = None,
     accession_number: str | None = None,
 ) -> list[FilingSection]:
-    """Load extracted sections for ``ticker``, newest accession first.
+    """Load extracted sections for ``ticker``, newest filing first.
 
-    ``section`` and/or ``accession_number`` narrow the result. Accession
-    numbers embed the filing year/sequence, so DESC ordering is newest-first.
+    ``section`` and/or ``accession_number`` narrow the result. Ordering joins
+    the ``filings`` table for the true filing date — accession-number order is
+    NOT chronological (its prefix is the filing agent's CIK, which varies).
     """
     query = (
-        "SELECT accession_number, section, ticker, form, text, "
-        "word_count, matched_heading, confidence, extracted_at "
-        "FROM filing_sections WHERE ticker = ?"
+        "SELECT fs.accession_number, fs.section, fs.ticker, fs.form, fs.text, "
+        "fs.word_count, fs.matched_heading, fs.confidence, fs.extracted_at "
+        "FROM filing_sections fs "
+        "LEFT JOIN filings f ON f.ticker = fs.ticker "
+        "AND f.accession_number = fs.accession_number "
+        "WHERE fs.ticker = ?"
     )
     params: list[object] = [ticker.strip().upper()]
     if section is not None:
-        query += " AND section = ?"
+        query += " AND fs.section = ?"
         params.append(section)
     if accession_number is not None:
-        query += " AND accession_number = ?"
+        query += " AND fs.accession_number = ?"
         params.append(accession_number)
-    query += " ORDER BY accession_number DESC, section"
+    query += " ORDER BY f.filing_date DESC, fs.section"
 
     return [
         FilingSection(

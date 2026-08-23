@@ -61,6 +61,22 @@ _TEN_Q_HTML = f"""
 </body></html>
 """
 
+# A 20-F (foreign private issuer): risk in Item 3, business in Item 4,
+# MD&A-equivalent in Item 5.
+_TWENTY_F_HTML = f"""
+<html><body>
+<h2>Item 3. Key Information</h2>
+<p>D. Risk Factors</p>
+<p>{_RISKS}</p>
+<h2>Item 4. Information on the Company</h2>
+<p>{_BUSINESS}</p>
+<h2>Item 5. Operating and Financial Review and Prospects</h2>
+<p>{_MDNA}</p>
+<h2>Item 6. Directors and Senior Management</h2>
+<p>Not extracted.</p>
+</body></html>
+"""
+
 
 def test_extracts_sections_skips_toc_and_flags_missing():
     # --- 10-K: all three sections, TOC entries not mistaken for bodies.
@@ -103,7 +119,24 @@ def test_extracts_sections_skips_toc_and_flags_missing():
     assert q["risk_factors"].text == ""
     assert q["risk_factors"].word_count == 0
 
-    # Unknown form types are rejected up front.
+    # --- 20-F (foreign private issuer): Items 3/4/5 map to the same canonical
+    # names, and an amendment ("20-F/A") normalizes to the same map.
+    for form in ("20-F", "20-F/A"):
+        tf = filing_docs.fetch_filing_sections(
+            _filing(form), get_text=lambda url, ua: _TWENTY_F_HTML
+        )
+        f = {s.section: s for s in tf.normalized}
+        assert set(f) == {"business", "risk_factors", "mdna"}
+        assert "Demand may fluctuate" in f["risk_factors"].text
+        assert "The company designs products." in f["business"].text
+        assert "Revenue increased" in f["mdna"].text
+        assert "Not extracted" not in f["mdna"].text     # stopped before Item 6
+        assert all(s.confidence == "high" for s in tf.normalized)
+
+    assert filing_docs.has_section_map("10-K/A")
+    assert not filing_docs.has_section_map("40-F")       # wrapper form: not yet
+
+    # Unmapped form types are rejected up front (the pipeline skips them).
     try:
         filing_docs.fetch_filing_sections(_filing("8-K"), get_text=lambda u, a: "")
         raise AssertionError("expected ValueError")

@@ -35,6 +35,8 @@ response separately**.
 - [x] `news_articles` table + `save_news_articles`/`load_news_articles` + `ingest_news` glue.  ← `storage/store.py` + `ingestion/pipeline.py`
 - [x] `filings` table + `save_filings`/`load_filings` + `ingest_filings` (metadata).  ← `storage/store.py` + `ingestion/pipeline.py`
 - [x] `filing_sections` table + document fetcher with section extraction (business / risk factors / MD&A, extraction metadata + confidence flag, provenance instead of raw HTML, CLI dump script).  ← `ingestion/filing_docs.py` + `scripts/dump_filing_section.py` + `tests/test_filing_docs.py`
+- [x] Foreign-issuer support: 20-F section map (Items 3/4/5) + widened default forms incl. amendments; section loads ordered by true filing date.  ← `ingestion/filing_docs.py` + `ingestion/pipeline.py`
+- [ ] 40-F section extraction (wrapper form — content lives in exhibits: AIF + MD&A docs via the accession's index.json). Separate step; until then 40-F skips with a logged `no_section_map`.
 
 ## Stage 3 — `processing/`  ·  [ ] TODO
 - [ ] Sentiment scoring of social/news text.

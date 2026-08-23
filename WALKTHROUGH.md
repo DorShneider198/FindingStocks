@@ -193,7 +193,11 @@ skips accessions already extracted — EDGAR documents are immutable.
 ### `ingestion/filing_docs.py` — 10-K/10-Q section extraction
 
 Downloads a filing's primary document and extracts **business / risk_factors /
-mdna** as plain text (10-Q maps MD&A to Part I Item 2; no business section).
+mdna** as plain text. The item numbers differ per form and the map handles it:
+10-K (Items 1/1A/7), 10-Q (MD&A at Part I Item 2, no business section), and
+20-F for foreign private issuers (Items 3/4/5) — amendments (`/A`) normalize
+to the same maps. 40-F is a wrapper form whose content lives in exhibits;
+it's skipped with a logged `no_section_map` until exhibit support lands.
 Extraction is heuristic — headings are matched at line starts so mid-sentence
 cross-references ("see Item 1A…") don't fool it, and the TOC loses to the real
 section by body length. Every section records **word_count, matched_heading,

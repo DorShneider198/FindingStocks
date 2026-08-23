@@ -14,8 +14,17 @@ from dataclasses import dataclass
 from datetime import date
 
 from ingestion import _logging
+from ingestion import filing_docs
 from ingestion.edgar import fetch_filings
 from ingestion.filing_docs import fetch_filing_sections
+
+# Annual/quarterly report forms across domestic and foreign issuers, with
+# amendments. 40-F is requested (metadata is worth storing) even though
+# section extraction doesn't support it yet — those skip with a log line.
+DEFAULT_DOC_FORMS = (
+    "10-K", "10-Q", "20-F", "40-F",
+    "10-K/A", "10-Q/A", "20-F/A", "40-F/A",
+)
 from ingestion.fundamentals import fetch_fundamentals
 from ingestion.news import fetch_news
 from ingestion.prices import fetch_prices
@@ -184,7 +193,7 @@ def ingest_filings(
 def ingest_filing_sections(
     conn: sqlite3.Connection,
     ticker: str,
-    forms: tuple[str, ...] = ("10-K", "10-Q"),
+    forms: tuple[str, ...] = DEFAULT_DOC_FORMS,
     limit: int = 3,
     user_agent: str | None = None,
     get_text=None,
@@ -213,6 +222,12 @@ def ingest_filing_sections(
     raw_id = 0
     try:
         for filing in filings:
+            if not filing_docs.has_section_map(filing.form):
+                _logging.warning(
+                    _logger, "ingest.skip", source="sec_edgar_doc", ticker=ticker_clean,
+                    form=filing.form, reason="no_section_map",
+                )
+                continue
             if store.load_filing_sections(conn, ticker_clean, accession_number=filing.accession_number):
                 continue  # immutable document, already extracted
             result = fetch_filing_sections(filing, user_agent=user_agent, get_text=get_text)
