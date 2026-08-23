@@ -3,6 +3,12 @@
 This file is the durable context for this project. Read it at the start of every
 session and follow the working rules below without exception.
 
+## Orientation
+- `CLAUDE.md` (this file) — the goal, the rules, the architecture.
+- `ROADMAP.md` — the staged checklist; which module is next.
+- `WALKTHROUGH.md` — **how the code actually works**: the fetcher pattern, every
+  file, the DB schema, the data flow. Read this when returning after a break.
+
 ## What this is
 A stock research / sentiment aggregation tool for a **private investor**. Today the
 user researches stocks manually — reading Reddit, news, and financial data, then

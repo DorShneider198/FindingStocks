@@ -1,0 +1,249 @@
+# WALKTHROUGH — how this project actually works
+
+Written for you coming back after time away. `CLAUDE.md` holds the goal and the
+rules; `ROADMAP.md` holds the checklist. **This file explains the code itself** —
+the pattern every module follows, a file-by-file map, and how data travels from
+an API into the database.
+
+**Contents:**
+[Status](#status) · [Running it](#running-it) · [The one pattern](#the-one-pattern-that-explains-everything) ·
+[Data flow](#how-data-flows) · [File by file](#file-by-file) · [The database](#the-database) ·
+[Working rules](#working-rules)
+
+---
+
+## Status
+
+*Stage 1–2 (ingestion + storage). 5 fetchers built. 12 tests passing.*
+
+| Source | Fetch | Store | Notes |
+|---|:---:|:---:|---|
+| Prices (yfinance) | ✅ | ✅ | `price_bars` table, full pipeline glue |
+| Fundamentals (yfinance) | ✅ | ✅ | `fundamentals` table, full pipeline glue |
+| Reddit (PRAW) | ✅ | ✅ | `reddit_mentions` table, full pipeline glue |
+| News (Finnhub) | ✅ | ❌ | **no table, no `ingest_news`** — fetches but can't save |
+| SEC filings (EDGAR) | ✅ | ❌ | **no table, no `ingest_filings`** — fetches but can't save |
+
+**The gap:** two of the five fetchers are only half-wired. They pull data fine,
+but there's nowhere to put it.
+
+**Next step:** the `news_articles` table + `save_news_articles` /
+`load_news_articles` in `storage/store.py`, plus `ingest_news` in `pipeline.py`.
+It mirrors the Reddit trio exactly.
+
+**After that:** `processing/` — sentiment scoring and per-day aggregation. That's
+the first module that *thinks* about the data instead of just moving it.
+
+Everything downstream — `processing/`, `features/`, `dashboard/`, `models/` — is
+still an empty `__init__.py`. `models/` stays **locked** until you say otherwise.
+
+---
+
+## The 30-second version
+
+You give the tool a ticker. It collects data about that ticker from several
+sources — prices, fundamentals, SEC filings, Reddit, news — and stores it in a
+local SQLite file. Later it will score sentiment, detect hype spikes, and show it
+all on a dashboard.
+
+Right now **only the collect-and-store half exists.** Nothing analyzes or
+displays anything yet. There is no app to launch, no CLI, no dashboard — the code
+is a library that tests and a REPL can call.
+
+---
+
+## Running it
+
+```bash
+cd ~/FindingStocks
+.venv/bin/python -m pytest          # 12 passed in ~1s
+```
+
+To pull real data, open a REPL — the closest thing to "using" the tool today:
+
+```python
+from storage import store
+from ingestion.pipeline import ingest_prices
+
+conn = store.get_connection()        # creates data/findingstocks.db
+ingest_prices(conn, "AAPL")          # fetch a year of prices and save it
+store.load_price_bars(conn, "AAPL")  # read it back
+```
+
+### Secrets live in the environment, never in the code
+
+| Variable | Needed for | Where it comes from |
+|---|---|---|
+| `FINNHUB_API_KEY` | news | finnhub.io dashboard |
+| `REDDIT_CLIENT_ID` | Reddit | reddit.com/prefs/apps → create a "script" app |
+| `REDDIT_CLIENT_SECRET` | Reddit | same page |
+| `REDDIT_USER_AGENT` | Reddit | optional; defaults to a sensible string |
+| `SEC_EDGAR_USER_AGENT` | SEC filings | optional; SEC just wants a contact email |
+
+Prices and fundamentals need **no key at all** — yfinance is free and
+unauthenticated. And no key is needed to run the tests: every test injects a fake
+client, so the whole suite runs offline.
+
+---
+
+## The one pattern that explains everything
+
+**Every fetcher in `ingestion/` is built identically.** Learn it once and all
+five files read the same way:
+
+```
+fetch_<source>(ticker, ...options, <injectable client>) -> <Source>FetchResult
+```
+
+The returned object is always the same envelope:
+
+| Field | What it holds |
+|---|---|
+| `source` | a string tag — `"yfinance"`, `"sec_edgar"`, `"reddit"`, `"finnhub"` |
+| `ticker` | the cleaned, upper-cased ticker |
+| `fetched_at` | UTC timestamp of the fetch |
+| `normalized` | tidy dataclass records — the useful shape |
+| `raw` | the untouched API response |
+
+**Why `raw` always tags along:** it's a project rule. If you later want a field
+you didn't normalize, you can mine it out of the stored raw responses instead of
+re-fetching everything and re-spending your rate limits. The raw archive is the
+safety net for every decision you haven't made yet.
+
+Every fetcher also:
+
+- **cleans the ticker** — `.strip().upper()`, raising `ValueError` if it's empty;
+- **logs four events** — `fetch.start`, `fetch.ok`, `fetch.empty`, `fetch.error`;
+- **takes an injectable client** so tests never touch the network;
+- **reads secrets lazily** — only when a real fetch actually happens.
+
+That last point is why the tests need no API keys: pass a fake client and the
+code never goes looking for one.
+
+---
+
+## How data flows
+
+```
+      yfinance / SEC EDGAR / PRAW / Finnhub
+                        |
+                        v
+              ingestion/<source>.py         fetch + normalize
+                        |
+                        v
+         FetchResult { normalized, raw }    the envelope
+                        |
+                        v
+              ingestion/pipeline.py         glue: raw -> text
+                        |
+             +----------+----------+
+             |                     |
+             v                     v
+      save_<thing>()          save_raw()
+      (typed table)           (raw archive)
+             |                     |
+             +----------+----------+
+                        |
+                        v
+              data/findingstocks.db         SQLite, one file
+```
+
+The **pipeline** layer exists for exactly one reason: to keep `storage/` ignorant
+of where data came from. yfinance returns a pandas DataFrame, PRAW returns Python
+objects, Finnhub returns a JSON list — the pipeline turns each into a plain
+string before handing it over. Storage only ever sees text.
+
+---
+
+## File by file
+
+### `ingestion/` — one fetcher per source
+
+| File | Source | Key? | Produces |
+|---|---|:---:|---|
+| `prices.py` | yfinance | no | `list[PriceBar]` — daily OHLCV |
+| `fundamentals.py` | yfinance | no | one `FundamentalsSnapshot` — P/E, market cap, sector |
+| `edgar.py` | SEC EDGAR | no | `list[Filing]` — 10-K, 10-Q, 8-K |
+| `reddit.py` | PRAW | yes | `list[RedditMention]` — posts naming the ticker |
+| `news.py` | Finnhub | yes | `list[NewsArticle]` — headlines + summaries |
+
+Two details worth re-learning:
+
+- **`fundamentals.py` is a snapshot, not a time series.** One fetch makes one
+  row, stamped with today's date. Fetch it monthly and you accumulate history
+  that way.
+- **`edgar.py` makes two HTTP calls.** First it looks up the ticker's CIK number
+  in SEC's public ticker map, then it fetches that company's filings. SEC's only
+  requirement is a User-Agent carrying a contact email — no key, no account.
+
+### `ingestion/pipeline.py` — fetch and save in one call
+
+Three functions today: `ingest_prices`, `ingest_fundamentals`, `ingest_reddit`.
+Each does the same three steps — fetch, save the normalized rows, save the raw
+payload — and returns an `IngestSummary(ticker, rows_written, raw_id)`.
+
+`ingest_news` and `ingest_filings` **don't exist yet.** That's the gap.
+
+### `ingestion/_logging.py` — structured logging
+
+A thin wrapper over stdlib `logging` that emits lines like
+`fetch.ok source=finnhub ticker=AAPL rows=12`.
+
+The rule baked into its docstring: **never log credentials or payloads** — only
+source, ticker, small counts, and exception *type names*. No API keys, no post
+bodies, no `.info` dicts.
+
+It deliberately does *not* configure output — that's an application's job, and
+there's no application yet. Call `configure_logging()` in a REPL when you want to
+watch it work.
+
+### `tests/` — one test per module
+
+12 tests, all offline. Each proves its module normalizes correctly, preserves
+`raw`, and rejects an empty ticker. They run in about a second.
+
+---
+
+## The database
+
+`storage/store.py` is the whole storage layer — schema and access in one file.
+`get_connection()` opens the DB and creates any missing tables, so there's no
+migration step to remember. Pass `":memory:"` for a throwaway DB; that's what the
+tests use.
+
+| Table | Primary key | One row per |
+|---|---|---|
+| `price_bars` | `(ticker, date)` | trading day |
+| `fundamentals` | `(ticker, as_of)` | fetch-day snapshot |
+| `reddit_mentions` | `(ticker, post_id)` | Reddit post |
+| `raw_responses` | auto `id` | raw payload ever fetched |
+
+**Everything upserts.** Re-running an ingest never creates duplicates — it
+overwrites the existing row. For Reddit that's deliberate: re-fetching a post
+refreshes its score and comment count, so those numbers stay current rather than
+freezing at whatever they were the first time.
+
+`raw_responses` is the one table that only grows. It's an append-only archive,
+one row per fetch, and it's what makes the "always keep the raw response" rule
+real rather than aspirational.
+
+---
+
+## Working rules
+
+From `CLAUDE.md`, and they exist because this project is big enough to get away
+from you:
+
+1. **One module at a time.** Propose the interface contract → wait for approval →
+   write it with one test → stop and show.
+2. **Never dump hundreds of lines at once.**
+3. **Never touch `models/`** until you explicitly unlock it.
+4. **When something's unclear, ask.** Don't assume.
+
+The reason for contract-first: it's far cheaper to change your mind about a
+dataclass shape in conversation than after three modules already depend on it.
+
+---
+
+*Keep this file current as modules land — it's what makes coming back after a
+break cheap.*
