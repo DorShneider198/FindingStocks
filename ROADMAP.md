@@ -22,7 +22,7 @@ response separately**.
 - [x] Fundamentals fetcher (yfinance snapshot).  ← `ingestion/fundamentals.py` + `tests/test_fundamentals.py`
 - [x] SEC EDGAR filings fetcher (free, no key — stdlib `urllib`).  ← `ingestion/edgar.py` + `tests/test_edgar.py`
 - [x] Reddit fetcher (PRAW — wallstreetbets, stocks, investing).  ← `ingestion/reddit.py` + `tests/test_reddit.py`
-- [ ] News fetcher (Finnhub or NewsAPI).
+- [x] News fetcher (Finnhub company-news, key via `FINNHUB_API_KEY`).  ← `ingestion/news.py` + `tests/test_news.py`
 - [ ] (Skipped for now: Twitter/X — paid; StockTwits — registration paused.)
 
 ## Stage 2 — `storage/`  ·  [ ] IN PROGRESS
