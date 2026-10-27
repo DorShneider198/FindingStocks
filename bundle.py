@@ -60,6 +60,7 @@ def bundle_project(root_dir: str = "."):
             if p.is_file()
             and p.suffix in TARGET_EXTENSIONS
             and not should_ignore(p)
+            and p.name != OUTPUT_FILE  # don't bundle the previous bundle into the new one
         ]
     )
 

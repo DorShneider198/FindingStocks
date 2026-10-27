@@ -14,7 +14,7 @@ explicitly unlocked.
 - [x] `CLAUDE.md` (goal, priorities, working rules, architecture, data sources).
 - [x] `ROADMAP.md` (this file).
 
-## Stage 1 — `ingestion/`  ·  [ ] TODO
+## Stage 1 — `ingestion/`  ·  [x] DONE (one item parked)
 One fetcher per source. Each returns a **normalized format** AND stores the **raw
 response separately**.
 - [x] Prices fetcher (yfinance).  ← done: `ingestion/prices.py` + `tests/test_prices.py`
@@ -64,8 +64,8 @@ Do **not** build until the user explicitly says so.
 
 ---
 
-## Suggested order (user decides)
-`storage/` and `ingestion/` are the natural first two — everything downstream consumes
-their output. A reasonable first concrete step is a single ingestion fetcher (e.g.
-prices via yfinance) returning a normalized shape, then `storage/` to persist it. But
-**the user picks the starting module.**
+## Open items (user picks what's next)
+- Dashboard tab that renders the LLM briefs with citation links (Stage 5).
+- 40-F section extraction (Stage 2).
+- Reddit match confidence — parked until Reddit credentials are available (Stage 1).
+- Sentiment scoring + per-day aggregation — deliberately parked (Stage 3).

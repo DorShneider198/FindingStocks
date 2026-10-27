@@ -14,7 +14,8 @@ an API into the database.
 
 ## Status
 
-*Stages 1–2 built (ingestion + storage), minimal dashboard live. 19 tests passing.*
+*Stages 1–2 built (ingestion + storage), first processing piece (LLM briefs) built,
+minimal dashboard live. 19 tests passing.*
 
 | Source | Fetch | Store | Notes |
 |---|:---:|:---:|---|
@@ -43,9 +44,9 @@ instead of an invented thesis. Cached in the `briefs` table by
 dashboard tab that renders briefs with citation links.
 
 `dashboard/` now holds the minimal app (`app.py` UI + `views.py` data layer —
-see [File by file](#file-by-file)). `processing/`, `features/`, and `models/`
-are still empty `__init__.py`s; `models/` stays **locked** until you say
-otherwise. Parked: Reddit match-confidence tiers (see `ROADMAP.md`).
+see [File by file](#file-by-file)). `processing/` holds `explain.py`;
+`features/` and `models/` are still empty `__init__.py`s; `models/` stays
+**locked** until you say otherwise. Parked: Reddit match-confidence tiers (see `ROADMAP.md`).
 
 ---
 

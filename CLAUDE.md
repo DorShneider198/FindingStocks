@@ -1,13 +1,20 @@
 # CLAUDE.md — Stock Research & Sentiment Aggregation Tool
 
-This file is the durable context for this project. Read it at the start of every
-session and follow the working rules below without exception.
+This file is the durable context for this project. Follow the working rules below
+without exception.
 
 ## Orientation
 - `CLAUDE.md` (this file) — the goal, the rules, the architecture.
-- `ROADMAP.md` — the staged checklist; which module is next.
+- `ROADMAP.md` — the staged checklist and **the current status**; which module is next.
 - `WALKTHROUGH.md` — **how the code actually works**: the fetcher pattern, every
   file, the DB schema, the data flow. Read this when returning after a break.
+
+## Commands
+- Tests: `.venv/bin/python -m pytest` (offline; every test injects a fake client)
+- Dashboard: `.venv/bin/streamlit run dashboard/app.py` (localhost:8501)
+- Inspect a filing section: `.venv/bin/python scripts/dump_filing_section.py AAPL risk_factors`
+- Secrets: env vars or a gitignored `.env` at the repo root — full list in
+  `WALKTHROUGH.md` → "Running it". Never commit keys.
 
 ## What this is
 A stock research / sentiment aggregation tool for a **private investor**. Today the
@@ -48,8 +55,8 @@ Hard rules:
 - `ingestion/`  — one fetcher per source (prices, fundamentals, reddit, news). Each
   returns a normalized format; **always store the raw response separately too.**
 - `storage/`    — schema + DB access layer.
-- `processing/` — sentiment scoring + aggregation per ticker per day (sentiment score,
-  mention volume, change in volume).
+- `processing/` — LLM research briefs (`explain.py`), and later sentiment scoring +
+  aggregation per ticker per day (sentiment score, mention volume, change in volume).
 - `features/`   — assemble a feature vector per ticker per day.
 - `dashboard/`  — the first useful deliverable (the MVP).
 - `models/`     — last, and separate. **Locked** (see priority #2).
@@ -59,7 +66,8 @@ Hard rules:
 - **Official filings:** SEC EDGAR (free).
 - **Reddit:** PRAW (free, rate-limited) — subreddits like wallstreetbets, stocks,
   investing.
-- **News:** a news API such as Finnhub or NewsAPI.
+- **News:** Finnhub company-news (key via `FINNHUB_API_KEY`).
+- **LLM briefs:** Anthropic API (key via `ANTHROPIC_API_KEY`).
 - **Twitter/X:** SKIP for now — paid pay-per-use API, no real free tier, expensive
   for reads.
 - **StockTwits:** SKIP for now — new developer API registration is currently paused.
@@ -67,5 +75,10 @@ Hard rules:
   it grows.
 
 ## Status
-Scaffolding complete (folder skeleton + this file + `ROADMAP.md`). No feature code
-written yet. See `ROADMAP.md` for the staged breakdown and which module is next.
+Kept in `ROADMAP.md` only — read it before starting work, and update it (not this
+file) when a module lands.
+
+## Don't touch
+- `full_project_context.md` — a generated, gitignored snapshot made by `bundle.py`
+  for pasting into a chat. It is stale by design: never read it or edit it; read
+  the real source files instead.
